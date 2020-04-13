@@ -11,6 +11,8 @@ import io.vertx.core._
 import io.vertx.core.buffer.Buffer
 import io.vertx.core.http.ServerWebSocket
 import io.vertx.core.net.{ NetClientOptions, NetSocket }
+import io.vertx.ext.web.Router
+import io.vertx.ext.web.handler.StaticHandler
 import java.io. { BufferedReader, InputStreamReader, PipedInputStream, PipedOutputStream }
 import java.nio.charset.StandardCharsets
 import java.util.regex.Matcher
@@ -44,7 +46,7 @@ object Server extends TaskApp {
       case (currentLine, buffer) =>
       val bufferText = buffer.toString()
       val lineEnding = """(?=[\r\n])\r?\n?"""
-      val bufferLines = bufferText.split(lineEnding, -1).toList
+      val bufferLines = bufferText.split(lineEnding, -1)
       if (bufferLines.length <= 1) {
         (currentLine + bufferText, Observable.empty[String])
       } else {
@@ -98,6 +100,9 @@ object Server extends TaskApp {
     val vertx = Vertx.vertx
     val netClient = vertx.createNetClient(new NetClientOptions().setTcpKeepAlive(true))
     val httpServer = vertx.createHttpServer
+
+    val router = Router.router(vertx)
+    router.route().handler(StaticHandler.create())
     
     for {
       il2ServerSocket <- netClient.connectL(20000, args(0))
@@ -107,6 +112,8 @@ object Server extends TaskApp {
       il2ServerData = il2ServerStream.publish(Scheduler.global)
       
       readIl2ServerMessages = il2ServerData.connect()
+
+      _ = httpServer.requestHandler(router.handle)
       
       _ = httpServer.webSocketHandler(handleWebsocketConnection(il2ServerSocket, il2ServerData))
       
