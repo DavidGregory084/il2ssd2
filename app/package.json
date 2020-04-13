@@ -1,0 +1,25 @@
+{
+  "name": "il2ssd",
+  "version": "1.0.0",
+  "description": "IL-2 Simple Server Daemon",
+  "main": "index.js",
+  "repository": "https://github.com/DavidGregory084/il2ssd2",
+  "author": "David Gregory <davidgregory084@gmail.com>",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "parcel-bundler": "^1.12.4"
+  },
+  "scripts": {
+    "start": "parcel index.html",
+    "build-production": "parcel build index.html",
+    "clean": "rm -rf node_modules dist"
+  },
+  "dependencies": {
+    "immutable": "^4.0.0-rc.12",
+    "mini.css": "^3.0.1",
+    "ramda": "^0.27.0",
+    "react": "^16.13.1",
+    "react-dom": "^16.13.1",
+    "react-router-dom": "^5.1.2"
+  }
+}
