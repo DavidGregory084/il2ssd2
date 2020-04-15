@@ -73,7 +73,7 @@ const Console = ({ messages }) => {
 
     return (
         <div className={"card fluid"}>
-            <textarea ref={consoleRef} className={"row"} readOnly={true} value={messages.join("")}></textarea>
+            <textarea ref={consoleRef} className={"row"} readOnly={true} value={messages.join("\n")}></textarea>
             <input className={"row"} disabled={!connected} onKeyDown={handleConsoleInput(webSocket)}></input>
         </div>
     );

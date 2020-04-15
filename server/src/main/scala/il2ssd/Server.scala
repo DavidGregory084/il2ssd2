@@ -94,25 +94,27 @@ object Server extends TaskApp {
     val decoded = decode[ClientMessage](message)
 
     decoded.foreach {
-      case ConsoleCommand(command) =>
+      case msg @ ConsoleCommand(command) =>
+        logger.info(s"Received client message: ${msg}")
         il2ServerSocket.write(command + "\n")
       case _ =>
     }
 
     decoded.swap.foreach {
       case parsing: ParsingFailure =>
-        println(parsing.message)
+        logger.error(s"Failed parsing client message ${message}", parsing)
       case decoding: DecodingFailure =>
-        println(decoding.message)
+        logger.error(s"Failed parsing client message ${message}", decoding)
     }
   }
 
   def consoleMessages(il2ServerLines: Observable[String]): Observable[ServerMessage] = {
     il2ServerLines.map { messageText =>
       val sanitisedText = StringEscapeUtils.unescapeJava(messageText)
-      val promptSymbol = Matcher.quoteReplacement("$\n")
+      val promptSymbol = Matcher.quoteReplacement("$")
       val withPrompt = sanitisedText.replaceAll("""<consoleN><\d+>""", promptSymbol)
-      ServerMessage.console(withPrompt)
+      val trimmedNewline = withPrompt.replaceFirst("""\n$""", "")
+      ServerMessage.console(trimmedNewline)
     }
   }
 
@@ -163,12 +165,13 @@ object Server extends TaskApp {
 
   def handleWebsocketConnection(il2ServerSocket: NetSocket, il2ServerMessages: Observable[ServerMessage]): Handler[ServerWebSocket] = { uiSocket: ServerWebSocket =>
     val sendServerMessages = il2ServerMessages
+      .doOnNext(msg => taskLogger.info(s"Sending server message: ${msg}"))
       .map(_.asJson.noSpaces)
       .mapEval(uiSocket.writeTextMessageL)
       .lastL.runToFuture(IOScheduler)
 
     uiSocket.endHandler(_ => sendServerMessages.cancel())
-
+    uiSocket.closeHandler(_ => sendServerMessages.cancel())
     uiSocket.textMessageHandler(handleClientMessage(uiSocket, il2ServerSocket))
   }
 
