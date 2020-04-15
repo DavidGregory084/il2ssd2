@@ -1,0 +1,32 @@
+.container {
+    height: 85vh;
+}
+
+.card {
+    height: 100%;
+}
+
+.content {
+    height: 100%;
+}
+
+textarea.row {
+    height: 100%;
+}
+
+input.row {
+    height: 2em;
+}
+
+.fas {
+    line-height: inherit;
+    vertical-align: middle;
+}
+
+.fas.icon-green {
+    color: #32a852;
+}
+
+.fas.icon-red {
+    color: #b71c1c;
+}

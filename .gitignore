@@ -5,3 +5,4 @@
 **/.metals/
 .dotty-ide-disabled
 .ghcid
+server/src/main/resources/
