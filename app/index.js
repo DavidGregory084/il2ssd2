@@ -6,6 +6,7 @@ import './src/app.css';
 import 'mini.css/dist/mini-dark.css';
 import '@fortawesome/fontawesome-free/css/fontawesome.css';
 import '@fortawesome/fontawesome-free/css/solid.css';
+import '@fortawesome/fontawesome-free/css/regular.css';
 
 function main() {
   ReactDOM.render(<App />, document.getElementById('app'));

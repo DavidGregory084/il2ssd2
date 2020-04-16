@@ -1,5 +1,5 @@
 .container {
-    height: 85vh;
+    height: 84vh;
 }
 
 .card {
@@ -18,15 +18,15 @@ input.row {
     height: 2em;
 }
 
-.fas {
+.fas, .far {
     line-height: inherit;
     vertical-align: middle;
 }
 
-.fas.icon-green {
+.fas.icon-green, .far.icon-green {
     color: #32a852;
 }
 
-.fas.icon-red {
+.fas.icon-red, .far.icon-green {
     color: #b71c1c;
 }

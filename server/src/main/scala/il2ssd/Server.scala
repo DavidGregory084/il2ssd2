@@ -19,6 +19,7 @@ import monix.execution.{ Scheduler, UncaughtExceptionReporter }
 import monix.eval._
 import monix.reactive._
 import org.apache.commons.text.StringEscapeUtils
+import scala.concurrent.duration._
 import vertices._
 import vertices.core._
 
@@ -36,6 +37,8 @@ object Server extends TaskApp {
   case class ConsoleMessage(message: String) extends ServerMessage
   case class PilotJoinMessage(socket: Int, ip: String, port: Int, name: String) extends ServerMessage
   case class PilotLeaveMessage(socket: Int, ip: String, port: Int) extends ServerMessage
+  case class HostMessage(socket: Int, ip: String, port: Int, name: String, number: Int) extends ServerMessage
+  case class UserMessage(number: Int, name: String, ping: Int, score: Int, army: String, aircraft: Option[String]) extends ServerMessage
   case class MissionPlayingMessage(mission: String) extends ServerMessage
   case class MissionLoadedMessage(mission: String) extends ServerMessage
   case class MissionNotLoadedMessage() extends ServerMessage
@@ -45,6 +48,8 @@ object Server extends TaskApp {
     implicit val consoleCodec: Codec.AsObject[ConsoleMessage] = deriveCodec(identity, false, TypeField)
     implicit val pilotJoinCodec: Codec.AsObject[PilotJoinMessage] = deriveCodec(identity, false, TypeField)
     implicit val pilotLeaveCodec: Codec.AsObject[PilotLeaveMessage] = deriveCodec(identity, false, TypeField)
+    implicit val hostCodec: Codec.AsObject[HostMessage] = deriveCodec(identity, false, TypeField)
+    implicit val userCodec: Codec.AsObject[UserMessage] = deriveCodec(identity, false, TypeField)
     implicit val missionPlayingCodec: Codec.AsObject[MissionPlayingMessage] = deriveCodec(identity, false, TypeField)
     implicit val missionLoadedCodec: Codec.AsObject[MissionLoadedMessage] = deriveCodec(identity, false, TypeField)
     implicit val missionNotLoadedCodec: Codec.AsObject[MissionNotLoadedMessage] = deriveCodec(identity, false, TypeField)
@@ -55,6 +60,10 @@ object Server extends TaskApp {
       PilotJoinMessage(socket, ip, port, name)
     def pilotLeave(socket: Int, ip: String, port: Int): ServerMessage =
       PilotLeaveMessage(socket, ip, port)
+    def host(socket: Int, ip: String, port: Int, name: String, number: Int) =
+      HostMessage(socket, ip, port, name, number)
+    def user(number: Int, name: String, ping: Int, score: Int, army: String, aircraft: Option[String]) =
+      UserMessage(number, name, ping, score, army, aircraft)
     def missionPlaying(mission: String): ServerMessage =
       MissionPlayingMessage(mission)
     def missionLoaded(mission: String): ServerMessage =
@@ -102,61 +111,67 @@ object Server extends TaskApp {
 
     decoded.swap.foreach {
       case parsing: ParsingFailure =>
-        logger.error(s"Failed parsing client message ${message}", parsing)
+        logger.error(s"Failed decoding client message ${message}", parsing)
       case decoding: DecodingFailure =>
         logger.error(s"Failed parsing client message ${message}", decoding)
     }
   }
 
-  def consoleMessages(il2ServerLines: Observable[String]): Observable[ServerMessage] = {
+  def unescapedLines(il2ServerLines: Observable[String]): Observable[String] = {
     il2ServerLines.map { messageText =>
       val sanitisedText = StringEscapeUtils.unescapeJava(messageText)
       val promptSymbol = Matcher.quoteReplacement("$")
       val withPrompt = sanitisedText.replaceAll("""<consoleN><\d+>""", promptSymbol)
       val trimmedNewline = withPrompt.replaceFirst("""\n$""", "")
-      ServerMessage.console(trimmedNewline)
+      trimmedNewline
     }
   }
 
   def pilotMessages(il2ServerLines: Observable[String]): Observable[ServerMessage] = {
-    val MatchPilotJoinMessage = """socket channel '(\d+)', ip (\d+{1,3}(?:\.\d{1,3}){3}):(\d+), (\S+), is complete created\\n""".r
-    val MatchPilotLeaveMessage = """socketConnection with (\d+{1,3}(?:\.\d{1,3}){3}):(\d+) on channel (\d+) lost\.  Reason:.*\\n""".r
+    val MatchPilotJoinMessage = """socket channel '(\d+)', ip (\d+{1,3}(?:\.\d{1,3}){3}):(\d+), (\S+), is complete created""".r
+    val MatchPilotLeaveMessage = """socketConnection with (\d+{1,3}(?:\.\d{1,3}){3}):(\d+) on channel (\d+) lost\.  Reason:.*""".r
+    val MatchHostMessage = """\u0020(\d+): (\S+) \[(\d+)\](\d+{1,3}(?:\.\d{1,3}){3}):(\d+)""".r
+    val MatchUserMessage = """\u0020(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+\(\d+\)(\S+)\s+(.+)?""".r
     il2ServerLines.collect {
       case MatchPilotJoinMessage(socket, ip, port, name) =>
-        PilotJoinMessage(socket.toInt, ip, port.toInt, name)
+        ServerMessage.pilotJoin(socket.toInt, ip, port.toInt, name)
       case MatchPilotLeaveMessage(ip, port, socket) =>
-        PilotLeaveMessage(socket.toInt, ip, port.toInt)
+        ServerMessage.pilotLeave(socket.toInt, ip, port.toInt)
+      case MatchHostMessage(number, name, socket, ip, port) =>
+        ServerMessage.host(socket.toInt, ip, port.toInt, name, number.toInt)
+      case MatchUserMessage(number, name, ping, score, army, aircraft) =>
+        ServerMessage.user(number.toInt, name, ping.toInt, score.toInt, army, Option(aircraft))
     }
   }
 
   def missionMessages(il2ServerLines: Observable[String]): Observable[ServerMessage] = {
-    val MatchMissionPlayingMessage = """Mission: (.+\.mis) is Playing\\n""".r
-    val MatchMissionLoadedMessage = """Mission: (.+\.mis) is Loaded\\n""".r
-    val MatchMissionNotLoadedMessage = """Mission NOT loaded\\n""".r
+    val MatchMissionPlayingMessage = """Mission: (.+\.mis) is Playing""".r
+    val MatchMissionLoadedMessage = """Mission: (.+\.mis) is Loaded""".r
+    val MatchMissionNotLoadedMessage = """Mission NOT loaded""".r
     il2ServerLines.collect {
       case MatchMissionPlayingMessage(mission) =>
-        MissionPlayingMessage(mission)
+        ServerMessage.missionPlaying(mission)
       case MatchMissionLoadedMessage(mission) =>
-        MissionLoadedMessage(mission)
+        ServerMessage.missionLoaded(mission)
       case MatchMissionNotLoadedMessage() =>
-        MissionNotLoadedMessage()
+        ServerMessage.missionNotLoaded
     }
   }
 
   def difficultyMessages(il2ServerLines: Observable[String]): Observable[ServerMessage] = {
-    val MatchDifficultyMessage = """\\u0020 ([A-Za-z0-9_]+)\s*(0|1)\\n""".r
+    val MatchDifficultyMessage = """\u0020 ([A-Za-z0-9_]+)\s*(0|1)""".r
     il2ServerLines.collect {
       case MatchDifficultyMessage(setting, "0") =>
-        DifficultyMessage(setting, false)
+        ServerMessage.difficulty(setting, false)
       case MatchDifficultyMessage(setting, "1") =>
-        DifficultyMessage(setting, true)
+        ServerMessage.difficulty(setting, true)
     }
   }
 
   def serverMessages(il2ServerData: Observable[Buffer]): Observable[ServerMessage] = {
-    val il2ServerLines = bufferLines(il2ServerData).dump("server lines")
+    val il2ServerLines = unescapedLines(bufferLines(il2ServerData)).dump("server lines")
     Observable(
-      consoleMessages(il2ServerLines),
+      il2ServerLines.map(ServerMessage.console),
       pilotMessages(il2ServerLines),
       missionMessages(il2ServerLines),
       difficultyMessages(il2ServerLines),
@@ -165,14 +180,20 @@ object Server extends TaskApp {
 
   def handleWebsocketConnection(il2ServerSocket: NetSocket, il2ServerMessages: Observable[ServerMessage]): Handler[ServerWebSocket] = { uiSocket: ServerWebSocket =>
     val sendServerMessages = il2ServerMessages
-      .doOnNext(msg => taskLogger.info(s"Sending server message: ${msg}"))
       .map(_.asJson.noSpaces)
       .mapEval(uiSocket.writeTextMessageL)
-      .lastL.runToFuture(IOScheduler)
+      .runAsyncGetLast(IOScheduler)
 
     uiSocket.endHandler(_ => sendServerMessages.cancel())
     uiSocket.closeHandler(_ => sendServerMessages.cancel())
     uiSocket.textMessageHandler(handleClientMessage(uiSocket, il2ServerSocket))
+  }
+
+  def handleServerMessage(il2ServerSocket: NetSocket, msg: ServerMessage): Task[Unit] = msg match {
+    case joined: PilotJoinMessage =>
+      il2ServerSocket.writeL(s"host ${joined.name}\n")
+    case _ =>
+      Task.unit
   }
 
   def run(args: List[String]): Task[ExitCode] = {
@@ -194,9 +215,16 @@ object Server extends TaskApp {
 
       il2ServerStream <- il2ServerSocket.toObservable(vertx)
 
-      il2ServerMessages = serverMessages(il2ServerStream).publish(IOScheduler)
+      il2ServerMessages = serverMessages(il2ServerStream)
+        .doOnNext(msg => taskLogger.info(s"Sending server message: ${msg}"))
+        .doOnNext(msg => handleServerMessage(il2ServerSocket, msg))
+        .publish(IOScheduler)
 
       produceServerMessages = il2ServerMessages.connect()
+
+      refreshServerData = Observable.intervalAtFixedRate(5.seconds, 5.seconds)
+        .doOnNext(_ => il2ServerSocket.writeL("user\n"))
+        .runAsyncGetLast(IOScheduler)
 
       _ = httpServer.requestHandler(router.handle)
 
@@ -209,6 +237,7 @@ object Server extends TaskApp {
       shutdownTask = () => {
         logger.info("Shutting down server")
         produceServerMessages.cancel()
+        refreshServerData.cancel()
         vertx.close()
       }
 
