@@ -2,17 +2,24 @@ val verticesVersion = "0.1.2"
 val monixVersion = "3.1.0"
 
 libraryDependencies ++= Seq(
-  "io.github.davidgregory084" %% "vertices-core" % verticesVersion,
-  "io.github.davidgregory084" %% "vertices-web" % verticesVersion,
+  // Async programming
   "io.monix" %% "monix-eval" % monixVersion,
   "io.monix" %% "monix-reactive" % monixVersion,
+  // Integrates Monix with Vert.x
+  "io.github.davidgregory084" %% "vertices-core" % verticesVersion,
+  "io.github.davidgregory084" %% "vertices-web" % verticesVersion,
+  // JSON
   "io.circe" %% "circe-parser" % "0.13.0",
   "io.circe" %% "circe-derivation" % "0.13.0-M4",
+  // Unescaping functions for Strings
   "org.apache.commons" % "commons-text" % "1.8",
+  // Logging
   "io.chrisdavenport" %% "log4cats-slf4j" % "1.0.1",
   "org.apache.logging.log4j" % "log4j-core" % "2.13.1",
   "org.apache.logging.log4j" % "log4j-slf4j-impl" % "2.13.1",
-  "com.typesafe.scala-logging" %% "scala-logging" % "3.9.2"
+  "com.typesafe.scala-logging" %% "scala-logging" % "3.9.2",
+  // Configuration
+  "com.typesafe" % "config" % "1.4.0",
 )
 
 scalaVersion := "2.13.1"

@@ -257,7 +257,8 @@ const App = props => {
     const [appState, dispatch] = useReducer(AppReducer, InitialAppState);
 
     useEffect(() => {
-        const webSocket = new WebSocket("ws://127.0.0.1:8080");
+        const wsProtocol = location.protocol === "https" ? "wss" : "ws";
+        const webSocket = new WebSocket(`${wsProtocol}://${location.hostname}:8080`);
 
         webSocket.onmessage = (event) => {
             dispatch(JSON.parse(event.data));
