@@ -258,10 +258,11 @@ const Ban = ({ ban }) => {
 };
 
 const Bans = ({ bans })=> {
-    const { webSocket } = useContext(AppContext);
+    const { webSocket, dispatch } = useContext(AppContext);
 
     useEffect(() => {
-       webSocket && webSocket.send(JSON.stringify(ConsoleCommand("ban")));
+        dispatch(ClearBansMessage());
+        webSocket && webSocket.send(JSON.stringify(ConsoleCommand("ban")));
     }, [webSocket]);
 
     return (
