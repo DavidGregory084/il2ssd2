@@ -31,6 +31,9 @@ object Server extends TaskApp {
   val uncaughtExceptionReporter = UncaughtExceptionReporter(exceptionHandler.handle)
   val IOScheduler = Scheduler.io("il2ssd-io", reporter = uncaughtExceptionReporter)
 
+  val vertx = Vertx.vertx.exceptionHandler(exceptionHandler)
+  val netClient = vertx.createNetClient(new NetClientOptions().setTcpKeepAlive(true))
+
   val TypeField = Some("type")
 
   sealed abstract class ServerMessage extends Product with Serializable
@@ -197,16 +200,15 @@ object Server extends TaskApp {
   }
 
   def run(args: List[String]): Task[ExitCode] = {
-    val vertx = Vertx.vertx.exceptionHandler(exceptionHandler)
-    val netClient = vertx.createNetClient(new NetClientOptions().setTcpKeepAlive(true))
-    val httpServer = vertx.createHttpServer
+    val staticHandler = StaticHandler.create()
+      .setCachingEnabled(false)
+      .setIncludeHidden(false)
 
     val router = Router.router(vertx)
+    router.route().handler(staticHandler)
 
-    router.route()
-      .handler(StaticHandler.create()
-        .setCachingEnabled(false)
-        .setIncludeHidden(false))
+    val httpServer = vertx.createHttpServer
+    httpServer.requestHandler(router.handle)
 
     for {
       il2ServerSocket <- netClient.connectL(20000, args(0))
@@ -222,11 +224,9 @@ object Server extends TaskApp {
 
       produceServerMessages = il2ServerMessages.connect()
 
-      refreshServerData = Observable.intervalAtFixedRate(5.seconds, 5.seconds)
+      refreshServerData = Observable.intervalAtFixedRate(10.seconds, 10.seconds)
         .doOnNext(_ => il2ServerSocket.writeL("user\n"))
         .runAsyncGetLast(IOScheduler)
-
-      _ = httpServer.requestHandler(router.handle)
 
       _ = httpServer.webSocketHandler(handleWebsocketConnection(il2ServerSocket, il2ServerMessages))
 
