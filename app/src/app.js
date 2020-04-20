@@ -199,6 +199,13 @@ const Pilot = ({ pilot }) => {
 };
 
 const Pilots = ({ pilots }) => {
+    const { webSocket } = useContext(AppContext);
+
+    useEffect(() => {
+       webSocket && webSocket.send(JSON.stringify(ConsoleCommand("host")));
+       webSocket && webSocket.send(JSON.stringify(ConsoleCommand("user")));
+    }, [webSocket]);
+
     return (
         <div className={"card fluid"}>
             <table>
@@ -251,6 +258,12 @@ const Ban = ({ ban }) => {
 };
 
 const Bans = ({ bans })=> {
+    const { webSocket } = useContext(AppContext);
+
+    useEffect(() => {
+       webSocket && webSocket.send(JSON.stringify(ConsoleCommand("ban")));
+    }, [webSocket]);
+
     return (
         <div className={"card fluid"}>
             <table>
@@ -288,6 +301,12 @@ const DifficultySetting = ({ missionStatus, setting }) => {
 };
 
 const Difficulty = ({ missionStatus, difficulty }) => {
+    const { webSocket } = useContext(AppContext);
+
+    useEffect(() => {
+       webSocket && webSocket.send(JSON.stringify(ConsoleCommand("difficulty")));
+    }, [webSocket]);
+
     return (
         <div className={"card fluid"}>
             <table>
@@ -389,10 +408,6 @@ const App = props => {
             dispatch(ConnectionMessage(true, webSocket));
             webSocket.send(JSON.stringify(ConsoleCommand("server")));
             webSocket.send(JSON.stringify(ConsoleCommand("mission")));
-            webSocket.send(JSON.stringify(ConsoleCommand("host")));
-            webSocket.send(JSON.stringify(ConsoleCommand("user")));
-            webSocket.send(JSON.stringify(ConsoleCommand("ban")));
-            webSocket.send(JSON.stringify(ConsoleCommand("difficulty")));
         };
 
         return () => {
