@@ -7,12 +7,15 @@
   "author": "David Gregory <davidgregory084@gmail.com>",
   "license": "Apache-2.0",
   "devDependencies": {
+    "env-cmd": "^10.1.0",
     "parcel-bundler": "^1.12.4"
   },
   "scripts": {
-    "start": "parcel index.html",
-    "build-production": "parcel build index.html",
-    "clean": "rm -rf node_modules dist"
+    "start": "env-cmd -e development parcel index.html",
+    "start-test": "env-cmd -e test parcel index.html",
+    "start-prod": "env-cmd -e production parcel index.html",
+    "build-production": "env-cmd -e production parcel build index.html",
+    "clean": "rm -rf .cache node_modules dist"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^5.13.0",

@@ -27,6 +27,10 @@ input.row {
     color: #32a852;
 }
 
-.fas.icon-red, .far.icon-green {
+.fas.icon-red, .far.icon-red {
+    color: #b71c1c;
+}
+
+.fas.fa-minus-circle {
     color: #b71c1c;
 }

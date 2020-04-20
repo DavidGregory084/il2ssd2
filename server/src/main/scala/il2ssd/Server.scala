@@ -1,6 +1,7 @@
 package il2ssd
 
 import cats.effect._
+import cats.kernel.instances.string._
 import com.typesafe.scalalogging._
 import io.circe._
 import io.circe.Codec
@@ -45,6 +46,8 @@ object Server extends TaskApp {
   case class MissionPlayingMessage(mission: String) extends ServerMessage
   case class MissionLoadedMessage(mission: String) extends ServerMessage
   case class MissionNotLoadedMessage() extends ServerMessage
+  case class NameBanMessage(name: String) extends ServerMessage
+  case class IPBanMessage(ip: String) extends ServerMessage
   case class DifficultyMessage(setting: String, enabled: Boolean) extends ServerMessage
   object ServerMessage {
     implicit val codec: Codec.AsObject[ServerMessage] = deriveCodec(identity, false, TypeField)
@@ -56,6 +59,8 @@ object Server extends TaskApp {
     implicit val missionPlayingCodec: Codec.AsObject[MissionPlayingMessage] = deriveCodec(identity, false, TypeField)
     implicit val missionLoadedCodec: Codec.AsObject[MissionLoadedMessage] = deriveCodec(identity, false, TypeField)
     implicit val missionNotLoadedCodec: Codec.AsObject[MissionNotLoadedMessage] = deriveCodec(identity, false, TypeField)
+    implicit val nameBanCodec: Codec.AsObject[NameBanMessage] = deriveCodec(identity, false, TypeField)
+    implicit val ipBanCodec: Codec.AsObject[IPBanMessage] = deriveCodec(identity, false, TypeField)
     implicit val difficultyCodec: Codec.AsObject[DifficultyMessage] = deriveCodec(identity, false, TypeField)
     def console(message: String): ServerMessage =
       ConsoleMessage(message)
@@ -73,6 +78,10 @@ object Server extends TaskApp {
       MissionLoadedMessage(mission)
     val missionNotLoaded: ServerMessage =
       MissionNotLoadedMessage()
+    def nameBan(name: String): ServerMessage =
+      NameBanMessage(name)
+    def ipBan(ip: String): ServerMessage =
+      IPBanMessage(ip)
     def difficulty(setting: String, enabled: Boolean): ServerMessage =
       DifficultyMessage(setting, enabled)
   }
@@ -102,12 +111,13 @@ object Server extends TaskApp {
     }.flatten
   }
 
-  def handleClientMessage(uiSocket: ServerWebSocket, il2ServerSocket: NetSocket): Handler[String] = { message: String =>
+  def handleClientMessage(uiSocket: ServerWebSocket, il2ServerSocket: NetSocket, commandObserver: Observer[ConsoleCommand]): Handler[String] = { message: String =>
     val decoded = decode[ClientMessage](message)
 
     decoded.foreach {
       case msg @ ConsoleCommand(command) =>
         logger.info(s"Received client message: ${msg}")
+        commandObserver.onNext(msg)
         il2ServerSocket.write(command + "\n")
       case _ =>
     }
@@ -161,27 +171,54 @@ object Server extends TaskApp {
     }
   }
 
-  def difficultyMessages(il2ServerLines: Observable[String]): Observable[ServerMessage] = {
-    val MatchDifficultyMessage = """\u0020 ([A-Za-z0-9_]+)\s*(0|1)""".r
-    il2ServerLines.collect {
-      case MatchDifficultyMessage(setting, "0") =>
-        ServerMessage.difficulty(setting, false)
-      case MatchDifficultyMessage(setting, "1") =>
-        ServerMessage.difficulty(setting, true)
+  def banMessage(il2ServerLine: String): Observable[ServerMessage] = {
+    val MatchIPBanMessage = """\u0020 (\d+{1,3}(?:\.\d{1,3}){3})""".r
+    val MatchNameBanMessage = """\u0020 (\S+)""".r
+    il2ServerLine match {
+      case MatchIPBanMessage(ip) =>
+        Observable(ServerMessage.ipBan(ip))
+      case MatchNameBanMessage(name) =>
+        Observable(ServerMessage.nameBan(name))
+      case _ =>
+        Observable.empty
     }
   }
 
-  def serverMessages(il2ServerData: Observable[Buffer]): Observable[ServerMessage] = {
-    val il2ServerLines = unescapedLines(bufferLines(il2ServerData)).dump("server lines")
+  def difficultyMessage(il2ServerLine: String): Observable[ServerMessage] = {
+    val MatchDifficultyMessage = """\u0020 ([A-Za-z0-9_]+)\s*(0|1)""".r
+    il2ServerLine match {
+      case MatchDifficultyMessage(setting, "0") =>
+        Observable(ServerMessage.difficulty(setting, false))
+      case MatchDifficultyMessage(setting, "1") =>
+        Observable(ServerMessage.difficulty(setting, true))
+      case _ =>
+        Observable.empty
+    }
+  }
+
+  def serverMessages(il2ServerData: Observable[Buffer], commandStream: Observable[ConsoleCommand]): Observable[ServerMessage] = {
+    val il2ServerLines = unescapedLines(bufferLines(il2ServerData))
+
+    val lastCommand = commandStream
+      .filter(cmd => cmd.command == "difficulty" || cmd.command == "ban")
+      .distinctUntilChangedByKey(_.command)
+
     Observable(
       il2ServerLines.map(ServerMessage.console),
       pilotMessages(il2ServerLines),
       missionMessages(il2ServerLines),
-      difficultyMessages(il2ServerLines),
+      il2ServerLines.withLatestFrom(lastCommand) {
+        case (line, ConsoleCommand("ban")) =>
+          banMessage(line)
+        case (line, ConsoleCommand("difficulty")) =>
+          difficultyMessage(line)
+        case _ =>
+          Observable.empty
+      }.flatten
     ).merge
   }
 
-  def handleWebsocketConnection(il2ServerSocket: NetSocket, il2ServerMessages: Observable[ServerMessage]): Handler[ServerWebSocket] = { uiSocket: ServerWebSocket =>
+  def handleWebsocketConnection(il2ServerSocket: NetSocket, il2ServerMessages: Observable[ServerMessage], commandObserver: Observer[ConsoleCommand]): Handler[ServerWebSocket] = { uiSocket: ServerWebSocket =>
     val sendServerMessages = il2ServerMessages
       .map(_.asJson.noSpaces)
       .mapEval(uiSocket.writeTextMessageL)
@@ -189,7 +226,7 @@ object Server extends TaskApp {
 
     uiSocket.endHandler(_ => sendServerMessages.cancel())
     uiSocket.closeHandler(_ => sendServerMessages.cancel())
-    uiSocket.textMessageHandler(handleClientMessage(uiSocket, il2ServerSocket))
+    uiSocket.textMessageHandler(handleClientMessage(uiSocket, il2ServerSocket, commandObserver))
   }
 
   def handleServerMessage(il2ServerSocket: NetSocket, msg: ServerMessage): Task[Unit] = msg match {
@@ -210,14 +247,18 @@ object Server extends TaskApp {
     val httpServer = vertx.createHttpServer
     httpServer.requestHandler(router.handle)
 
-    for {
-      il2ServerSocket <- netClient.connectL(20000, args(0))
+    val (commandObserver, commandStream) = Pipe
+      .behavior[ConsoleCommand](ConsoleCommand("server"))
+      .multicast(IOScheduler)
 
-      _ <- taskLogger.info(s"Connected to ${args(0)}")
+    for {
+      il2ServerSocket <- netClient.connectL(args(1).toInt, args(0))
+
+      _ <- taskLogger.info(s"Connected to ${args(0)}:${args(1)}")
 
       il2ServerStream <- il2ServerSocket.toObservable(vertx)
 
-      il2ServerMessages = serverMessages(il2ServerStream)
+      il2ServerMessages = serverMessages(il2ServerStream, commandStream)
         .doOnNext(msg => taskLogger.info(s"Sending server message: ${msg}"))
         .doOnNext(msg => handleServerMessage(il2ServerSocket, msg))
         .publish(IOScheduler)
@@ -228,7 +269,7 @@ object Server extends TaskApp {
         .doOnNext(_ => il2ServerSocket.writeL("user\n"))
         .runAsyncGetLast(IOScheduler)
 
-      _ = httpServer.webSocketHandler(handleWebsocketConnection(il2ServerSocket, il2ServerMessages))
+      _ = httpServer.webSocketHandler(handleWebsocketConnection(il2ServerSocket, il2ServerMessages, commandObserver))
 
       _ <- httpServer.listenL(8080)
 
